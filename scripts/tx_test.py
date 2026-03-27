@@ -44,20 +44,39 @@ def send_packet(host, port, packet_list):
 
 
 def test_tx(host: str, port: int, mtu: int = 8000):
+    """Create a numypy array and then put that through the socket created form the address and port with the given MTU. Currently will only send a series of packets with a payload of 75% of the MTU.
 
-    # Usage example
+    Parameters
+    ----------
+    host : str
+        The address of the location where this will be sent.
+    port : int
+        The port of the desired location.
+    mtu : int
+        The MTU setting of the connection
+    """
 
-    packet = b"Hello, server!"
     nsamps = 10000
     nbpnum = 16
     nbypnum = nbpnum // 8
     sc_fa = 2 ** (nbpnum - 1)
+    numsppkt = int(0.75 * mtu / nbypnum)
 
     n = np.arange(nsamps, dtype=float)
-    nper = 10.0
+    nper = 40.0
     x1 = sc_fa * np.cos(2 * np.pi * n / nper)
+    x1[x1 >= sc_fa] = sc_fa - 1
+    x1[x1 <= -1 * sc_fa] = -1 * sc_fa
     x1_int = x1.astype(np.int16)
-    if send_packet(host, port, packet):
+    nnums = len(x1_int)
+    n_els = int(np.ceil(nnums / numsppkt))
+    pkt_list = []
+    for ilist in range(n_els):
+        cur_ind = np.arange(ilist * numsppkt, (ilist + 1) * numsppkt)
+        cur_ind = cur_ind[cur_ind < nnums]
+        pkt_list.append(x1_int[cur_ind])
+
+    if send_packet(host, port, pkt_list):
         print("Packet sent successfully.")
     else:
         print("Failed to send packet.")

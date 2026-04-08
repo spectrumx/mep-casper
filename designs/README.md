@@ -12,7 +12,7 @@ For example, this can be four 16 bit real samples or two 16 complex samples.
 
 ## Notes on Errors
 
-This I'm calling a axi4lite_sw_reg_in_we error. This is 
+This I'm calling a axi4lite_sw_reg_in_we error. This is gives the following output:
 
 ```
 
@@ -44,6 +44,7 @@ Error using jasper (line 23)
 Backend build failed! Check log files for more information
 
 ```
+The reason for this is that in the design there may only be to or from processors software registers in the design. There needs to be both types to get things to work properly  
 
 
 I'm calling something a top error here. If the build fails after `top: <file_name>` log then the input field to one of the software registers needs to be changed. It needs to be changed from a float to a hex or int.

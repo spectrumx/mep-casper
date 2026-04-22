@@ -5,7 +5,7 @@ import numpy as np
 from jsonargparse import auto_cli
 
 
-def send_packet(host, port, packet_list):
+def send_packet(host, port, packet_list, source_ip, source_port):
     """
     Send a packet to a specified host and port using a socket.
 
@@ -24,14 +24,16 @@ def send_packet(host, port, packet_list):
     """
     try:
         # Create a socket object
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        sock.bind((source_ip, source_port))  # Empty string = all interfaces
         # Connect to the host and port
-        sock.connect((host, port))
+        # sock.connect((host, port))
 
+        print(sock.getsockname())
         # Send the packet
         for ipn, ipkt in enumerate(packet_list):
-            sock.sendall(ipkt)
+            sock.sendto(ipkt, (host, port))
             print(f"Sent {ipn} of {len(packet_list)}")
         # Close the socket
         sock.close()
@@ -43,7 +45,7 @@ def send_packet(host, port, packet_list):
         return False
 
 
-def test_tx(host: str, port: int, mtu: int = 8000):
+def test_tx(host: str, port: int, mtu: int = 8000, s_host="192.168.5.10", s_port=60000):
     """Create a numypy array and then put that through the socket created form the address and port with the given MTU. Currently will only send a series of packets with a payload of 75% of the MTU.
 
     Parameters
@@ -76,7 +78,7 @@ def test_tx(host: str, port: int, mtu: int = 8000):
         cur_ind = cur_ind[cur_ind < nnums]
         pkt_list.append(x1_int[cur_ind])
 
-    if send_packet(host, port, pkt_list):
+    if send_packet(host, port, pkt_list, s_host, s_port):
         print("Packet sent successfully.")
     else:
         print("Failed to send packet.")

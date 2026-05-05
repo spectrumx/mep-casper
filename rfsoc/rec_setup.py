@@ -1,0 +1,212 @@
+# !python
+import time
+from pathlib import Path
+
+import casperfpga
+import numpy as np
+import schedule
+
+
+class ZCURec(casperfpga.CasperFpga):
+    def __init__(self, rfsoc_addr):
+        """
+        Parameters
+        ----------
+        rfsoc_addr : str
+            Address of the rfsoc, make sure if IP its a string
+        """
+        super().__init__(host=rfsoc_addr)
+
+    def start_up(
+        self,
+        fpgfile,
+        pps_sync=False,
+        reflock=False,
+        log_func=print,
+        clk_file=None,
+        cold_start=True,
+    ):
+        """Start the RFSoC given the write host name, fpga file and clock file. The clockfiles determine if it will be locked to a reference frequency.
+
+        Parameters
+        ----------
+        fpgfile : str
+            Basically bit file. Give it a .fpg file name and make theres a file with the same stem but .dtbo suffix.
+        pps_sync : bool
+            Runs the set time  function if set to true.
+        reflock : bool
+            Determines what clock file will be uploaded
+        log_func : func
+            A function to output logging.
+        clk_file : str
+            This can be used to over ride the clock file choice.
+        cold_start : bool
+            This will load the clock file and then reload the firmware. The clock files needs to reloaded to the ADCs after each start.
+
+        """
+
+        # These are the two default clock files on the rfsocs
+        if reflock and (clk_file is None):
+            clk_file = "250M_PL_125M_SYSREF_5M_EXT10MHZ.txt"
+        elif clk_file is None:
+            clk_file = "250M_PL_125M_SYSREF_5M.txt"
+
+        log_func(f"Uploading FPGA image {fpgfile}")
+        if not self.upload_to_ram_and_program(fpgfile):
+            raise RuntimeError("Failed to upload FPGA image")
+        # time.sleep(10)
+        # Start the ADC clocks on the RFSoC
+        if cold_start:
+            # if starting up from cold
+            log_func("Running from cold start, uploading adc clock file")
+            rfdc_zcu208 = self.adcs["rfdc"]
+
+            c = rfdc_zcu208.show_clk_files()
+            if clk_file not in c:
+                clk_list = "\n".join(clk_file)
+                raise ValueError(
+                    f"{clk_file} not listed as one of the following: \n{clk_list}"
+                )
+            log_func(f"Loading clock file {clk_file}")
+            if not rfdc_zcu208.progpll("lmk", clk_file):
+                raise RuntimeError("Failed to load clock file")
+            # time.sleep(5)
+            log_func("Initializing rfdc driver")
+            if not rfdc_zcu208.init():
+                raise RuntimeError("Failed to initialize rfdc driver")
+            # time.sleep(5)
+            num_tries = 3
+            for k_try in range(num_tries):
+                log_func("Checking ADC/DAC status")
+                try:
+                    adc_status = rfdc_zcu208.status()
+                except Exception:
+                    if k_try + 1 >= num_tries:
+                        raise
+                else:
+                    log_func(f"ADC/DAC status: {adc_status}")
+            # HACK need to reupload program again because clock file is causing issues with packets
+            if not self.upload_to_ram_and_program(fpgfile):
+                raise RuntimeError("Failed to upload FPGA image")
+
+        # time.sleep(5)
+        log_func("Setting time at PPS edge")
+        utc_time = self.set_time(log_func)
+        if pps_sync or reflock:
+            hold_time = 5
+            time.sleep(hold_time)
+            log_func("Checking PPS Avaliblilty")
+            pps_time, clcktime, clockcyles = self.get_times()
+            clockutcdiff = clcktime - utc_time
+            pps_diff = pps_time - utc_time
+            pps_fail = pps_diff < 3 or pps_diff > 50
+            if pps_sync and pps_fail:
+                log_func(
+                    f"Check PPS, does not seem to sync, with this difference in seconds: {pps_diff}"
+                )
+            elif pps_sync:
+                log_func("PPS found ")
+
+            if reflock:
+                log_func("Used clock file fo ref lock")
+
+    def get_times(self):
+        """Get the current times in the program.
+
+        Returns
+        -------
+        pps_time : int
+            UTC time in seconds according to a pps count with original utc input.
+        clock_time : int
+            UTC time in seconds according to a clock sycle counter added to the utc input.
+        clockcycles : int
+            Remander clock cycles from the clock time counter.
+        """
+
+        pps_time = self.read_int("timefrompps")
+        # writes a time check bool to freeze the current local clock cycles to a buffer
+        self.write_int("time_check", 1)
+        time.sleep(1)
+        clocktime = self.read_int("localclocksec")
+        clockcycles = self.read_int("localclockcycles")
+        time.sleep(1)
+        self.write_int("time_check", 0)
+        return pps_time, clocktime, clockcycles
+
+    def stop_packets(self):
+        """Stops the packets being transmitted.
+
+        HACK Does not stop the ADCs in the current design.
+
+        Parameters
+        ----------
+        zcu208 : casperfpga obj
+            This is the object that CASPER uses to upload commands to the FPGA.
+        """
+        self.write_int("pkt_rst", 3)
+
+    def set_freq(self, freq_chan, freq_int, log_func=print, set_the_time=False):
+        """Sets the center frequency of desired channel
+
+        Parameters
+        ----------
+        freq_chan : int
+            Currenty 0 or 1, which output channel maping to be set.
+        freq_int : int
+            Desired center frequency mapped to set of ints from 3-42 MHz with 2 MHz bands.
+        """
+        cnt_freqs = np.arange(3, 43, 2)
+        self.write_int(f"freq_sel{freq_chan}", freq_int)
+        log_func(
+            f"Center frequency for DDC {freq_chan} set to {cnt_freqs[freq_int]} MHz"
+        )
+        if set_the_time:
+            utc_time = self.set_time(log_func)
+
+    def set_time(self, log_func=print):
+        """Sets time to the second using pps."""
+        utc_time = time.time()
+        utc_int = int(utc_time)
+        # Hold till we get 2 seconds out
+        while time.time() < utc_int + 2:
+            pass
+        # Write the next utc time This will start everything
+        self.write_int("UTC", utc_int + 3)
+        timestr = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(utc_int))
+        log_func(f"Set pps to {timestr}")
+        return utc_int + 3
+
+    def restart_packets(self, log_func=print):
+        """Restarts the packets and updates the utc time.
+
+        Parameters
+        ----------
+        zcu208 : casperfpga obj
+            This is the object that CASPER uses to upload commands to the FPGA.
+        """
+        self.write_int("pkt_rst", 0)
+
+        utc_set = self.set_time(log_func)
+
+
+def rfsoc_eclipse_sched():
+    """This is running a simple start up of the RFSoC firmware and schedules the time to set every hour to avoid drift between different systems."""
+    rf_addr = "10.112.0.25"
+    fname_rel = Path(__file__).absolute().parent / "firmware"
+    flist = list(fname_rel.glob("eclipserecv1_3_*.fpg"))
+    flist.sort()
+    # use the newest firmware
+    fnamepath = flist[-1]
+    zcu208 = ZCURec(rf_addr)
+    zcu208.start_up(str(fnamepath), pps_sync=True, reflock=True, cold_start=True)
+    zcu208.set_freq(freq_chan=0, freq_int=2)
+    zcu208.set_freq(freq_chan=1, freq_int=14)
+    schedule.every().hour.at("59:57").do(zcu208.set_time)
+
+    while True:
+        schedule.run_pending()
+        time.sleep(1)
+
+
+if __name__ == "__main__":
+    rfsoc_eclipse_sched()

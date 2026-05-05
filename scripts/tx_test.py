@@ -104,7 +104,7 @@ def send_packets(host, port, packet_list, source_ip, source_port):
         #         print(f"Sent {ipn} of {len(packet_list)}")
         # # Create a socket object
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        # sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
         # sock.bind(("ens8191f1np1", source_port))  # Empty string = all interfaces
 
         # sock.setsockopt(
@@ -159,11 +159,19 @@ def test_tx(
     Parameters
     ----------
     fab_ip : str
-        The address of the location where this will be sent.
+        The address of the 10 Gbe fabric  where packets will be sent.
     port : int
         The port of the desired location.
     mtu : int
         The MTU setting of the connection
+    s_host : str
+        IP Address of host computer
+    s_port : int
+        Port of the host computer
+    rfsoc_ip : str
+        IP of the PS for the RFSoC that's running the casper image.
+    firmfile : str
+        Firmware file to be uploaded.
     """
 
     fpga, eth = setup_fpga(rfsoc_ip, firmfile)

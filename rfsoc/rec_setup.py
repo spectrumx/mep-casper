@@ -4,10 +4,11 @@ from pathlib import Path
 
 import casperfpga
 import numpy as np
+import paho.mqtt.client as mqtt
 import schedule
 
 
-class ZCURec(casperfpga.CasperFpga):
+class RFSOC4x2(casperfpga.CasperFpga):
     def __init__(self, rfsoc_addr):
         """
         Parameters
@@ -185,23 +186,52 @@ class ZCURec(casperfpga.CasperFpga):
             This is the object that CASPER uses to upload commands to the FPGA.
         """
         self.write_int("pkt_rst", 0)
+        log_func("Restarting packets.")
+        _ = self.set_time(log_func)
 
-        utc_set = self.set_time(log_func)
+    def better_clock_est(self, nsecs=20, slptime=1):
+        """Clock estimation method from Russ, will take some time to run.
+
+        Parameters
+        ----------
+        nsecs : int
+            Number of seconds to run the estimation.
+        slptime : float
+            Time between reading the sys_clkcounter.
+
+        Returns
+        -------
+        clk_MHz : float
+            The clock estimate in MHz.
+        """
+        s = []
+        t = []
+        for i in range(0, nsecs):
+            s.append(self.read_uint("sys_clkcounter"))
+            t.append(time.perf_counter())
+            time.sleep(slptime)
+        d = np.diff(s)
+        d[d < 0] += 2**32
+
+        clk_MHz = sum(d) / (t[-1] - t[0]) / 1e6 / slptime
+        return clk_MHz
 
 
-def rfsoc_eclipse_sched():
+def rfsoc_rx_sched(rf_addr="hay-rfsoc-003.mit.edu"):
     """This is running a simple start up of the RFSoC firmware and schedules the time to set every hour to avoid drift between different systems."""
-    rf_addr = "10.112.0.25"
+    # rf_addr = "10.112.0.25"
+    # Address for system on desk
+
     fname_rel = Path(__file__).absolute().parent / "firmware"
-    flist = list(fname_rel.glob("eclipserecv1_3_*.fpg"))
+    flist = list(fname_rel.glob("single_chan_rx*.fpg"))
     flist.sort()
     # use the newest firmware
     fnamepath = flist[-1]
-    zcu208 = ZCURec(rf_addr)
-    zcu208.start_up(str(fnamepath), pps_sync=True, reflock=True, cold_start=True)
-    zcu208.set_freq(freq_chan=0, freq_int=2)
-    zcu208.set_freq(freq_chan=1, freq_int=14)
-    schedule.every().hour.at("59:57").do(zcu208.set_time)
+    rfsoc = RFSOC4x2(rf_addr)
+    rfsoc.start_up(str(fnamepath), pps_sync=True, reflock=True, cold_start=True)
+    rfsoc.set_freq(freq_chan=0, freq_int=2)
+    rfsoc.set_freq(freq_chan=1, freq_int=14)
+    schedule.every().hour.at("59:57").do(rfsoc.set_time)
 
     while True:
         schedule.run_pending()
@@ -209,4 +239,5 @@ def rfsoc_eclipse_sched():
 
 
 if __name__ == "__main__":
-    rfsoc_eclipse_sched()
+    rf_addr = "hay-rfsoc-003.mit.edu"
+    rfsoc_rx_sched(rf_addr)

@@ -24,7 +24,7 @@ class RFSOC4x2(casperfpga.CasperFpga):
         pps_sync=False,
         reflock=False,
         log_func=print,
-        clk_file=None,
+        clk_files=None,
         cold_start=True,
     ):
         """Start the RFSoC given the write host name, fpga file and clock file. The clockfiles determine if it will be locked to a reference frequency.
@@ -46,11 +46,12 @@ class RFSOC4x2(casperfpga.CasperFpga):
 
         """
 
-        # These are the two default clock files on the rfsocs
-        if reflock and (clk_file is None):
-            clk_file = "250M_PL_125M_SYSREF_5M_EXT10MHZ.txt"
-        elif clk_file is None:
-            clk_file = "250M_PL_125M_SYSREF_5M.txt"
+        # This is the default clock files in the 4x2.
+        if clk_files is None:
+            clk_files = [
+                "rfsoc4x2_LMX_REF_245M76_OUT_491M52.txt",
+                "rfsoc4x2_PL_122M88_REF_245M76.txt",
+            ]
 
         log_func(f"Uploading FPGA image {fpgfile}")
         if not self.upload_to_ram_and_program(fpgfile):
@@ -60,27 +61,32 @@ class RFSOC4x2(casperfpga.CasperFpga):
         if cold_start:
             # if starting up from cold
             log_func("Running from cold start, uploading adc clock file")
-            rfdc_zcu208 = self.adcs["rfdc"]
+            rfdc = self.adcs["rfdc"]
 
-            c = rfdc_zcu208.show_clk_files()
-            if clk_file not in c:
-                clk_list = "\n".join(clk_file)
-                raise ValueError(
-                    f"{clk_file} not listed as one of the following: \n{clk_list}"
-                )
-            log_func(f"Loading clock file {clk_file}")
-            if not rfdc_zcu208.progpll("lmk", clk_file):
-                raise RuntimeError("Failed to load clock file")
+            c = rfdc.show_clk_files()
+
+            for iclk_file in clk_files:
+                if iclk_file not in c:
+                    clk_list = "\n".join(c)
+                    raise ValueError(
+                        f"{iclk_file} not listed as one of the following: \n{clk_list}"
+                    )
+            log_func(f"Loading clock file {clk_files}")
+            if not rfdc.progpll("lmx", clk_files[0]):
+                raise RuntimeError("Failed to load lmx clock file")
+            if not rfdc.progpll("lmk", clk_files[1]):
+                raise RuntimeError("Failed to load lmk clock file.")
+
             # time.sleep(5)
             log_func("Initializing rfdc driver")
-            if not rfdc_zcu208.init():
+            if not rfdc.init():
                 raise RuntimeError("Failed to initialize rfdc driver")
             # time.sleep(5)
             num_tries = 3
             for k_try in range(num_tries):
                 log_func("Checking ADC/DAC status")
                 try:
-                    adc_status = rfdc_zcu208.status()
+                    adc_status = rfdc.status()
                 except Exception:
                     if k_try + 1 >= num_tries:
                         raise
@@ -146,23 +152,26 @@ class RFSOC4x2(casperfpga.CasperFpga):
         """
         self.write_int("pkt_rst", 3)
 
-    def set_freq(self, freq_chan, freq_int, log_func=print, set_the_time=False):
+    def set_freq(self, desired_freq, log_func=print, set_the_time=False):
         """Sets the center frequency of desired channel
 
         Parameters
         ----------
-        freq_chan : int
-            Currenty 0 or 1, which output channel maping to be set.
-        freq_int : int
-            Desired center frequency mapped to set of ints from 3-42 MHz with 2 MHz bands.
+
+        desired_freq : float
+            Desired center frequency in Hz
         """
-        cnt_freqs = np.arange(3, 43, 2)
-        self.write_int(f"freq_sel{freq_chan}", freq_int)
+
+        clk_freq_Hz = 245.76e6
+        rot1 = 2**19
+        p_inc_dec = desired_freq * rot1 // clk_freq_Hz
+        freq_actual = p_inc_dec * clk_freq_Hz / rot1
+        self.write_int("pinc_dec", p_inc_dec)
         log_func(
-            f"Center frequency for DDC {freq_chan} set to {cnt_freqs[freq_int]} MHz"
+            f"Center frequency asked for {desired_freq} Hz \nActual Tuned frquency: {freq_actual} Hz"
         )
         if set_the_time:
-            utc_time = self.set_time(log_func)
+            _ = self.set_time(log_func)
 
     def set_time(self, log_func=print):
         """Sets time to the second using pps."""
@@ -182,12 +191,27 @@ class RFSOC4x2(casperfpga.CasperFpga):
 
         Parameters
         ----------
-        zcu208 : casperfpga obj
-            This is the object that CASPER uses to upload commands to the FPGA.
+        log_func : func
+            Function for logging.
         """
         self.write_int("pkt_rst", 0)
         log_func("Restarting packets.")
         _ = self.set_time(log_func)
+
+    def set_bitshift(self, bs_int, log_func=print):
+        """Set the bitshift for one of the channels on the rfsoc.
+
+        Parameters
+        ----------
+        bs_int : int
+            Desired bitshift, negative is right shift, positive is left shift.
+        log_func : func
+            The logging function.
+
+        """
+        assert -12 <= bs_int <= 8, f"Bit shift must be between -12 and 8, got: {bs_int}"
+        self.write_int("bitshift0", bs_int)
+        log_func(f"Bit shift for set to {bs_int}")
 
     def better_clock_est(self, nsecs=20, slptime=1):
         """Clock estimation method from Russ, will take some time to run.
@@ -229,8 +253,7 @@ def rfsoc_rx_sched(rf_addr="hay-rfsoc-003.mit.edu"):
     fnamepath = flist[-1]
     rfsoc = RFSOC4x2(rf_addr)
     rfsoc.start_up(str(fnamepath), pps_sync=True, reflock=True, cold_start=True)
-    rfsoc.set_freq(freq_chan=0, freq_int=2)
-    rfsoc.set_freq(freq_chan=1, freq_int=14)
+    rfsoc.set_freq(desired_freq=100000000)
     schedule.every().hour.at("59:57").do(rfsoc.set_time)
 
     while True:

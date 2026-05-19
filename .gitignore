@@ -215,3 +215,5 @@ slprj/
 .Xil/
 *.htm
 *.asv
+
+designs/*tut*.slx

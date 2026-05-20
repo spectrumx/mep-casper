@@ -150,7 +150,7 @@ class RFSOC4x2(casperfpga.CasperFpga):
         zcu208 : casperfpga obj
             This is the object that CASPER uses to upload commands to the FPGA.
         """
-        self.write_int("pkt_rst", 3)
+        self.write_int("rst", 3)
 
     def set_freq(self, desired_freq, log_func=print, set_the_time=False):
         """Sets the center frequency of desired channel
@@ -166,7 +166,7 @@ class RFSOC4x2(casperfpga.CasperFpga):
         rot1 = 2**19
         p_inc_dec = desired_freq * rot1 // clk_freq_Hz
         freq_actual = p_inc_dec * clk_freq_Hz / rot1
-        self.write_int("pinc_dec", p_inc_dec)
+        self.write_int("pinc_dec", int(p_inc_dec))
         log_func(
             f"Center frequency asked for {desired_freq} Hz \nActual Tuned frquency: {freq_actual} Hz"
         )
@@ -194,7 +194,7 @@ class RFSOC4x2(casperfpga.CasperFpga):
         log_func : func
             Function for logging.
         """
-        self.write_int("pkt_rst", 0)
+        self.write_int("rst", 0)
         log_func("Restarting packets.")
         _ = self.set_time(log_func)
 

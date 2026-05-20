@@ -100,6 +100,7 @@ class RFSOC4x2(casperfpga.CasperFpga):
                 raise RuntimeError("Failed to upload FPGA image")
 
         # time.sleep(5)
+        self.write_int("word_per_pkt", 1000)
         log_func("Setting IP and port.")
         self.set_rec_addr(ip_out=des_ip, port_out=des_port, log_func=log_func)
         log_func("Setting time at PPS edge")

@@ -26,6 +26,8 @@ class RFSOC4x2(casperfpga.CasperFpga):
         log_func=print,
         clk_files=None,
         cold_start=True,
+        des_ip="192.168.5.10",
+        des_port=60000,
     ):
         """Start the RFSoC given the write host name, fpga file and clock file. The clockfiles determine if it will be locked to a reference frequency.
 
@@ -92,11 +94,14 @@ class RFSOC4x2(casperfpga.CasperFpga):
                         raise
                 else:
                     log_func(f"ADC/DAC status: {adc_status}")
+
             # HACK need to reupload program again because clock file is causing issues with packets
             if not self.upload_to_ram_and_program(fpgfile):
                 raise RuntimeError("Failed to upload FPGA image")
 
         # time.sleep(5)
+        log_func("Setting IP and port.")
+        self.set_rec_addr(ip_out=des_ip, port_out=des_port, log_func=log_func)
         log_func("Setting time at PPS edge")
         utc_time = self.set_time(log_func)
         if pps_sync or reflock:
@@ -213,7 +218,7 @@ class RFSOC4x2(casperfpga.CasperFpga):
         self.write_int("bitshift0", bs_int)
         log_func(f"Bit shift for set to {bs_int}")
 
-    def set_rec_addr(self, ip_out, port_out):
+    def set_rec_addr(self, ip_out, port_out, log_func=print):
         """Set the address of the output data.
 
         Parameters
@@ -222,11 +227,15 @@ class RFSOC4x2(casperfpga.CasperFpga):
             The ip address for the output
         port_out : int
             The port out.
+        log_func : func
+            The logging function.
         """
         val = 2 ** np.array([24, 16, 8, 0])
         ippint = sum(np.array([int(i) for i in ip_out.split(".")]) * val)
         self.write_int("des_ip", ippint)
+        log_func(f"Destination IP address set to: {ip_out}")
         self.write_int("des_port", port_out)
+        log_func(f"Destination Port set to: {port_out}")
 
     def better_clock_est(self, nsecs=20, slptime=1):
         """Clock estimation method from Russ, will take some time to run.

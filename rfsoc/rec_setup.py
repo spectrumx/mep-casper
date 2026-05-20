@@ -225,8 +225,8 @@ class RFSOC4x2(casperfpga.CasperFpga):
         """
         val = 2 ** np.array([24, 16, 8, 0])
         ippint = sum(np.array([int(i) for i in ip_out.split(".")]) * val)
-        self.write_int("dest_ip", ippint)
-        self.write_int("dest_port", port_out)
+        self.write_int("des_ip", ippint)
+        self.write_int("des_port", port_out)
 
     def better_clock_est(self, nsecs=20, slptime=1):
         """Clock estimation method from Russ, will take some time to run.

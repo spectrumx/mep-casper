@@ -213,6 +213,21 @@ class RFSOC4x2(casperfpga.CasperFpga):
         self.write_int("bitshift0", bs_int)
         log_func(f"Bit shift for set to {bs_int}")
 
+    def set_rec_addr(self, ip_out, port_out):
+        """Set the address of the output data.
+
+        Parameters
+        ----------
+        ip_port : str
+            The ip address for the output
+        port_out : int
+            The port out.
+        """
+        val = 2 ** np.array([24, 16, 8, 0])
+        ippint = sum(np.array([int(i) for i in ip_out.split(".")]) * val)
+        self.write_int("dest_ip", ippint)
+        self.write_int("dest_port", port_out)
+
     def better_clock_est(self, nsecs=20, slptime=1):
         """Clock estimation method from Russ, will take some time to run.
 

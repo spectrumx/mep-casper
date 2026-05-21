@@ -12,3 +12,14 @@ This repository contains material related to the CASPER based firmware developme
   * These are mainly python files to run the built firmware to test and run the images.
 * firmware
   * Built firmware images. Both the fpg and dtbo files are needed to run an image.
+
+### Configure ARP tables
+
+With rfsoc object (e.g `rfsoc = rec_setup.RFSOC4x2("192.168.20.60")`),
+```
+ip = "192.168.4.1"  # destination IP address
+mac = 0x6c92bf4254ba  # substitute destination MAC address
+port = 60000
+rfsoc.gbes.gbe0.configure_core(mac, ip, port)
+rfsoc.gbes.gbe0.set_single_arp_entry(ip, mac)
+```
